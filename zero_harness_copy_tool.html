@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ゼロハーネス コピーツール</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif; background: #f5f5f5; color: #222; min-height: 100vh; padding: 24px 16px; }
+  h1 { font-size: 18px; font-weight: 500; margin-bottom: 20px; color: #333; }
+  #drop-zone { border: 2px dashed #aaa; border-radius: 12px; padding: 2rem; text-align: center; cursor: pointer; background: #fff; transition: background 0.15s; }
+  #drop-zone:hover { background: #f0f7ff; }
+  #drop-zone svg { width: 40px; height: 40px; color: #999; margin-bottom: 10px; }
+  #drop-zone p { margin: 4px 0; color: #555; font-size: 15px; }
+  #drop-zone small { color: #999; font-size: 13px; }
+  #bar { display: none; margin-top: 16px; align-items: center; gap: 10px; flex-wrap: wrap; background: #fff; border-radius: 10px; padding: 12px 16px; border: 1px solid #e5e5e5; }
+  #bar label { font-size: 13px; color: #666; }
+  #bar select, #bar input[type=number] { font-size: 13px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 6px; }
+  #bar input[type=number] { width: 60px; }
+  #count-badge { font-size: 12px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px; padding: 2px 10px; color: #666; }
+  #cards { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge { font-size: 14px; font-weight: 500; border-radius: 6px; padding: 5px 12px; white-space: nowrap; }
+  .badge-no   { background: #f1f5f9; color: #334155; }
+  .badge-size { background: #dbeafe; color: #1e40af; }
+  .badge-qty  { background: #dcfce7; color: #166534; }
+  .badge-shop { background: #ffedd5; color: #9a3412; }
+  .badge-name { background: #f3e8ff; color: #6b21a8; }
+  .copy-btn { display: flex; align-items: center; gap: 6px; font-size: 14px; padding: 6px 16px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; color: #333; flex-shrink: 0; }
+  .copy-btn:hover { background: #f9fafb; }
+  .copy-btn:active { background: #f3f4f6; }
+  textarea { width: 100%; font-size: 17px; line-height: 1.7; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; resize: none; color: #222; font-family: inherit; }
+  .empty { font-size: 14px; color: #999; padding: 12px 0; }
+</style>
+</head>
+<body>
+
+<h1>ゼロハーネス コピーツール</h1>
+
+<div id="drop-zone" onclick="document.getElementById('fi').click()" ondragover="ev(event)" ondrop="drop(event)">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+  <p>Excelファイルをドロップ</p>
+  <small>.xlsx をドラッグ、またはクリックして選択</small>
+  <input type="file" id="fi" accept=".xlsx,.xls" style="display:none" onchange="loadFile(this.files[0])">
+</div>
+
+<div id="bar">
+  <label>シート：</label>
+  <select id="sheet-select" onchange="extract()"></select>
+  <label>開始行：</label>
+  <input id="start-row" type="number" value="4" min="1" oninput="extract()">
+  <span id="count-badge"></span>
+</div>
+
+<div id="cards"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+let wb = null;
+
+function ev(e){ e.preventDefault(); }
+function drop(e){ e.preventDefault(); loadFile(e.dataTransfer.files[0]); }
+
+function loadFile(file){
+  if(!file) return;
+  const r = new FileReader();
+  r.onload = e => {
+    wb = XLSX.read(e.target.result, {type:'array'});
+    document.getElementById('sheet-select').innerHTML = wb.SheetNames.map(n=>`<option>${n}</option>`).join('');
+    document.getElementById('bar').style.display = 'flex';
+    extract();
+  };
+  r.readAsArrayBuffer(file);
+}
+
+function cellVal(ws, col, row){
+  const cell = ws[col+row];
+  if(!cell||cell.v===undefined||cell.v===null) return '';
+  return (cell.w||String(cell.v)).replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
+}
+
+function extractNum(str){
+  const m = str.match(/\d+/);
+  return m ? m[0] : str;
+}
+
+function extract(){
+  if(!wb) return;
+  const ws = wb.Sheets[document.getElementById('sheet-select').value];
+  let row = parseInt(document.getElementById('start-row').value)||4;
+  const results = [];
+  while(true){
+    const d = cellVal(ws,'D',row);
+    if(!d) break;
+    results.push({
+      row, d,
+      a: cellVal(ws,'A',row),
+      c: cellVal(ws,'C',row),
+      g: extractNum(cellVal(ws,'G',row)),
+      h: cellVal(ws,'H',row),
+      j: cellVal(ws,'J',row),
+    });
+    row++;
+  }
+
+  document.getElementById('count-badge').textContent = results.length+' 件';
+  const cards = document.getElementById('cards');
+  cards.innerHTML = '';
+
+  if(results.length===0){
+    cards.innerHTML='<p class="empty">データが見つかりませんでした。開始行を確認してください。</p>';
+    return;
+  }
+
+  results.forEach((item,i)=>{
+    const lines = item.d.split('\n').length;
+    const taH = Math.max(60, lines*28+20);
+    const id = 'ta_'+i;
+
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const badges = [];
+    if(item.a) badges.push(`<span class="badge badge-no">No. ${item.a}</span>`);
+    if(item.c) badges.push(`<span class="badge badge-size">🏷 ${item.c}</span>`);
+    if(item.g) badges.push(`<span class="badge badge-qty">× ${item.g} 枚</span>`);
+    if(item.h) badges.push(`<span class="badge badge-shop">🏪 ${item.h}</span>`);
+    if(item.j) badges.push(`<span class="badge badge-name">👤 ${item.j}</span>`);
+
+    card.innerHTML = `
+      <div class="card-header">
+        <div class="badges">${badges.join('')}</div>
+        <button class="copy-btn" id="btn_${i}" onclick="copyText(${i})">
+          📋 コピー
+        </button>
+      </div>
+      <textarea id="${id}" readonly style="height:${taH}px"></textarea>
+    `;
+    cards.appendChild(card);
+    document.getElementById(id).value = item.d;
+  });
+}
+
+function copyText(i){
+  const ta = document.getElementById('ta_'+i);
+  const btn = document.getElementById('btn_'+i);
+  navigator.clipboard.writeText(ta.value).then(()=>flash(btn)).catch(()=>{
+    ta.select(); ta.setSelectionRange(0,99999);
+    document.execCommand('copy');
+    flash(btn);
+  });
+}
+
+function flash(btn){
+  btn.textContent = '✅ コピー完了';
+  setTimeout(()=>{ btn.innerHTML = '📋 コピー'; }, 1800);
+}
+</script>
+</body>
+</html>
